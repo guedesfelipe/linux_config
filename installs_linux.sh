@@ -1,4 +1,4 @@
-#!/bin/bash
+#/bin/bash
 
 # Text style codes
 BOLD='\033[1m'
@@ -39,8 +39,8 @@ header
 read -p "🐍 Enter the major Python version (default: 3): " python_major_user
 major_python_input="${python_major_user:-3}"  # Use 3 as the default if user input is empty
 
-read -p "🐍 Enter the minor Python version (default: 11): " python_minor_user
-minor_python_input="${python_minor_user:-11}"  # Use 11 as the default if user input is empty
+read -p "🐍 Enter the minor Python version (default: 13): " python_minor_user
+minor_python_input="${python_minor_user:-13}"  # Use 13 as the default if user input is empty
 
 PYTHON_VERSION="${major_python_input}.${minor_python_input}.*"
 
@@ -60,8 +60,9 @@ NODE_VERSION="${major_node_input}.${minor_node_input}.*"
 read -p "🦀 Enter the major Rust version (default: 1): " rust_major_user
 major_rust_input="${rust_major_user:-1}"  # Use 1 as the default if user input is empty
 
-read -p "🦀 Enter the minor Rust version (default: 74): " rust_minor_user
-minor_rust_input="${rust_minor_user:-74}"  # Use 74 as the default if user input is empty
+
+read -p "🦀 Enter the minor Rust version (default: 90): " rust_minor_user
+minor_rust_input="${rust_minor_user:-90}"  # Use 90 as the default if user input is empty
 
 RUST_VERSION="${major_rust_input}.${minor_rust_input}.*"
 
@@ -118,71 +119,116 @@ starship() {
 
 }
 
-
 asdf_install() {
+    local install_dir="$HOME/.local/bin"
+    local temp_dir
+    local latest_version
+    local download_url
+    local archive_name
+    local binary_path="$install_dir/asdf"
+
     asdf_dir="$HOME/.asdf"
     
     # Check if the directory exists
-    if [ ! -d "$starship_dir" ]; then
-        echo_header "Installing ASDF..."
-        latest_tag=$(git ls-remote --tags https://github.com/asdf-vm/asdf.git | awk '{print $2}' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -n 1)
-        git clone https://github.com/asdf-vm/asdf.git ~/.asdf --branch "$latest_tag"
-        
-        # Source the configuration file
-        source "$shell_rc_file"
-        
-        echo_success "ASDF Installed."
+    if [ ! -d "$asdf_dir" ]; then
+
+      # Obtém a última versão
+      echo_header "Fetching latest ASDF release..."
+      latest_version=$(curl -s https://api.github.com/repos/asdf-vm/asdf/releases/latest | grep '"tag_name":' | cut -d '"' -f4)
+      
+      if [ -z "$latest_version" ]; then
+          echo_error "Failed to get latest ASDF version."
+          return 1
+      fi
+
+      archive_name="asdf-${latest_version}-linux-amd64.tar.gz"
+      download_url="https://github.com/asdf-vm/asdf/releases/download/${latest_version}/${archive_name}"
+      temp_dir=$(mktemp -d)
+
+      echo_header "Downloading $archive_name..."
+      curl -L "$download_url" -o "$temp_dir/$archive_name"
+
+      echo_header "Extracting asdf binary..."
+      tar -xzf "$temp_dir/$archive_name" -C "$temp_dir"
+
+      if [ ! -f "$temp_dir/asdf" ]; then
+          echo_error "asdf binary not found after extraction."
+          return 1
+      fi
+
+      echo_header "Moving asdf to $install_dir..."
+      mv "$temp_dir/asdf" "$binary_path"
+      chmod +x "$binary_path"
+
+      # Limpa os arquivos temporários
+      rm -rf "$temp_dir"
     else
-        echo_error "ASDF already exists"
+      echo_error "ASDF already exists"
     fi
 
-    asdf_config_line='. "$HOME/.asdf/asdf.sh"'
-    asdf_completions_config_line='. "$HOME/.asdf/completions/asdf.bash"'
+    asdf_config_line='export PATH="${ASDF_DATA_DIR:-$HOME/.asdf}/shims:$PATH"'
+    asdf_completions_config_line='. <(asdf completion bash)'
 
     if ! grep -qF "$asdf_config_line" "$shell_rc_file" && ! grep -qF "$asdf_completions_config_line" "$shell_rc_file"; then
-        echo -e "${TAB}${BULLET_WARNING} Configure asdf..."
-        
-        if ! grep -qF "$asdf_config_line" "$shell_rc_file"; then
-            echo -e "\n${asdf_config_line}" >> "$shell_rc_file"
-        fi
-        
-        if ! grep -qF "$asdf_completions_config_line" "$shell_rc_file"; then
-            echo -e "\n${asdf_completions_config_line}" >> "$shell_rc_file"
-        fi
-        
-        # Source the configuration file
-        source "$shell_rc_file"
-        
-        echo_success "ASDF Configured."
+
+      if ! grep -qF "$asdf_config_line" "$shell_rc_file"; then
+          echo -e "\n${asdf_config_line}" >> "$shell_rc_file"
+      fi
+
+      if ! grep -qF "$asdf_completions_config_line" "$shell_rc_file"; then
+          echo -e "\n${asdf_completions_config_line}" >> "$shell_rc_file"
+      fi
+      echo_success "ASDF Configured."
     else
         echo_error "ASDF config exists"
     fi
 
+    echo_header "Verifying asdf installation..."
+    if type -a asdf | grep -q "$binary_path"; then
+        echo_success "ASDF installed successfully at $binary_path"
+    else
+        echo_error "ASDF not found in PATH. Make sure $install_dir is in your PATH."
+        return 1
+    fi
 }
 
-asdf_install_tools(){
+# Função auxiliar para pegar a última versão estável
+asdf_latest_stable_version() {
+    local plugin="$1"
+    local prefix="$2"
+
+    asdf list all "$plugin" \
+        | grep "^${prefix}" \
+        | grep -Ev '[-](dev|rc|a|b|alpha|beta)|[a-z]$' \
+        | tail -n 1
+}
+
+asdf_install_tools() {
     echo_header "Add ASDF plugins..."
+
     echo -e "\n${TAB}🐍 Add Python plugin..."
-    asdf plugin-add python
+    asdf plugin list | grep -q "^python$" || asdf plugin add python
+
     echo -e "\n${TAB}🦀 Add Rust plugin..."
-    asdf plugin-add rust https://github.com/code-lever/asdf-rust.git
+    asdf plugin list | grep -q "^rust$" || asdf plugin add rust https://github.com/code-lever/asdf-rust.git
+
     echo -e "\n${TAB}🤖 Add Nodejs plugin..."
-    asdf plugin add nodejs https://github.com/asdf-vm/asdf-nodejs.git
-    
-    install_python_version=$(asdf list-all python ${PYTHON_VERSION} | grep -v - | tail -n 1)
+    asdf plugin list | grep -q "^nodejs$" || asdf plugin add nodejs https://github.com/asdf-vm/asdf-nodejs.git
+
+    install_python_version=$(asdf_latest_stable_version python "$PYTHON_VERSION")
     echo -e "\n${TAB}🐍 Installing Python ${GREEN}${install_python_version}${RESET}..."
     asdf install python "${install_python_version}"
-    asdf global python "${install_python_version}"
-    
-    install_rust_version=$(asdf list-all rust ${RUST_VERSION} | grep -v - | tail -n 1)
+    asdf set -u python "${install_python_version}"
+
+    install_rust_version=$(asdf_latest_stable_version rust "$RUST_VERSION")
     echo -e "\n${TAB}🦀 Installing Rust ${GREEN}${install_rust_version}${RESET}..."
     asdf install rust "${install_rust_version}"
-    asdf global rust "${install_rust_version}"
-    
-    install_node_version=$(asdf list-all nodejs ${NODE_VERSION} | grep -v - | tail -n 1)
+    asdf set -u rust "${install_rust_version}"
+
+    install_node_version=$(asdf_latest_stable_version nodejs "$NODE_VERSION")
     echo -e "\n${TAB}🤖 Installing Node ${GREEN}${install_node_version}${RESET}..."
     asdf install nodejs "${install_node_version}"
-    asdf global nodejs "${install_node_version}"
+    asdf set -u nodejs "${install_node_version}"
 
     echo_success "ASDF plugins and tools installed"
 }
@@ -192,7 +238,7 @@ pls_install() {
         echo_error 'PLS-CLI already exists'
     else
         echo_header 'Installing pls-cli...'
-        pip install pls-cli
+        pipx install pls-cli
 
         echo 'pls' >> "$shell_rc_file"
         # Source the configuration file
@@ -226,7 +272,7 @@ lunarvim_install() {
         echo_error 'LunarVim already exists'
     else
         echo_header 'Installing LunarVim...'
-        LV_BRANCH='release-1.3/neovim-0.9' bash <(curl -s https://raw.githubusercontent.com/LunarVim/LunarVim/release-1.3/neovim-0.9/utils/installer/install.sh)
+        LV_BRANCH='release-1.4/neovim-0.9' bash <(curl -s https://raw.githubusercontent.com/LunarVim/LunarVim/release-1.4/neovim-0.9/utils/installer/install.sh)
         
         # Create alias to type vim and open nvim
         echo -e '\nalias vim="lvim"' >> "$shell_rc_file"
@@ -298,9 +344,9 @@ tmux_configure() {
       cp ~/.tmux/.tmux.conf.local ~/
 
       # GTMUX
-      # git clone git@github.com:guedesfelipe/.tmux.git ~/.gtmux
-      # ln -s -f ~/.gtmux/.tmux.conf ~/.tmux.conf
-      # ln -s -f ~/.gtmux/.tmux.conf.local ~/.tmux.conf.local
+      git clone git@github.com:guedesfelipe/.tmux.git ~/.gtmux
+      ln -s -f ~/.gtmux/.tmux.conf ~/.tmux.conf
+      ln -s -f ~/.gtmux/.tmux.conf.local ~/.tmux.conf.local
 
       echo -e '\nif [ "$TMUX" = "" ]; then tmux; fi' >> "$shell_rc_file"
 
@@ -337,6 +383,21 @@ poetry_install() {
     # Source the configuration file
     source "$shell_rc_file"
     poetry config virtualenvs.in-project true
+  fi
+
+}
+
+uv_install() {
+
+  if command -v "uv" &> /dev/null; then
+    echo_error 'UV already installed'
+  else
+    echo_header 'Installing UV...'
+    pipx install uv
+    echo 'eval "$(uv generate-shell-completion bash)"' >> "$shell_rc_file"
+    # Source the configuration file
+    source "$shell_rc_file"
+    echo_success 'UV installed'
   fi
 
 }
@@ -422,12 +483,14 @@ lunarvim_install
 tmux_configure
 docker_install
 poetry_install
+uv_install
 bat_config
 rc_config
 
 # should always be the last
-pls_install
+#pls_install
+pipx ensurepath
 echo -e "\n\n--Script Finished--\n\nMade with ${RED}❤${RESET} by Felipe Guedes"
 if [ ! command -v "docker" &> /dev/null ]; then
-  newgrp docker
+ newgrp docker
 fi
