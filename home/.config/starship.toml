@@ -1,0 +1,121 @@
+# Enable/Disable the newline at the start of the prompt
+add_newline = true
+
+# Overwrite a default_prompt_order and  use custom prompt_order
+format = """\
+$username\
+$hostname\
+$kubernetes\
+$directory\
+$gcloud\
+$git_branch\
+$git_commit\
+$git_state\
+$git_status\
+$hg_branch\
+$docker_context\
+$package\
+$python\
+$dotnet\
+$elixir\
+$elm\
+$erlang\
+$golang\
+$haskell\
+$java\
+$julia\
+$nodejs\
+$ocaml\
+$php\
+$purescript\
+$ruby\
+$rust\
+$terraform\
+$zig\
+$nix_shell\
+$conda\
+$memory_usage\
+$aws\
+$env_var\
+$crystal\
+$cmd_duration\
+$custom\
+$line_break\
+$jobs\
+$battery\
+$time\
+$character\
+"""
+
+[[battery.display]]  # "bold red" style when capacity is between 0% and 20%
+threshold = 20
+style = "bold red"
+
+[[battery.display]]  # "bold yellow" style when capacity is between 10% and 30%
+threshold = 30
+style = "bold yellow"
+
+[character]
+# use_symbol_for_status = true
+success_symbol = "[➜](bold green)"
+error_symbol = "[✗](bold red)"
+
+[directory]
+truncation_length = 8 
+# style = "bold fg:#ba68c8"
+truncation_symbol = "…/"
+
+[docker_context]
+format = "via [🐋 $context](blue bold)"
+
+[git_branch]
+truncation_length = 30
+style = "bold fg:#9e9e9e"
+
+[git_commit]
+commit_hash_length = 4
+
+[git_state]
+format = '[\($state( $progress_current of $progress_total)\)]($style) '
+cherry_pick = "[🍒 PICKING](bold red)"
+
+[git_status]
+format = '([\($all_status$ahead_behind\)]($style) )'
+conflicted = "[🛑${count}](fg:#ff1744)"
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕⇡${ahead_count}⇣${behind_count}"
+untracked = "[○${count}](fg:#e040fb)"
+stashed = "[📦 ${count}](fg:#e040fb)"
+modified = "📝${count}"
+staged = "[○${count}](green)"
+renamed = "»${count}"
+deleted = "[✗${count}](fg:#ff1744)"
+style = "fg:#aa00c7"
+
+[memory_usage]
+disabled = false
+threshold = 75
+symbol = "⚠️  "
+style = "bold dimmed green"
+format = "via $symbol [${ram} ${ram_pct}( | ${swap})]($style) "
+
+[python]
+style = 'fg:#00e676'
+# virtualenv = "venv"
+# python_binary = "./venv/bin/python3"
+
+# [time]
+# disabled = false
+# format = '🕙[\[ $time \]]($style) '
+# time_format = "%T"
+
+[custom.foo]
+command = "echo 🌱"  # shows output of command
+files = ["foo"]       # can specify filters
+when = """ test "$HOME" == "$PWD" """
+
+[gcloud]
+symbol = '️🇬️ '
+# format = 'on [$symbol$account(@$domain)(\($project\))]($style) '
+format = '[$symbol ($project)]($style) '
