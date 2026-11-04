@@ -13,7 +13,6 @@ pipx
 # terminal
 tmux
 starship
-neovim
 ripgrep
 fd-find
 fzf

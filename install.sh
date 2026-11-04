@@ -10,8 +10,10 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_DIR="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
 LOCAL_BIN="$HOME/.local/bin"
+mkdir -p "$LOCAL_BIN"
+export PATH="$LOCAL_BIN:$PATH"           # o que instalamos em ~/.local/bin vem antes do apt
 
-STEPS=(packages dotfiles terminal mise pipx atuin tmux nvim docker)
+STEPS=(packages dotfiles terminal mise pipx atuin tmux nvim zen docker)
 
 PIPX_PACKAGES=(pls-cli)                  # ferramentas Python instaladas via pipx
 PTYXIS_FONT='FiraCode Nerd Font 11'
@@ -37,6 +39,45 @@ link() {
   fi
   ln -s "$src" "$dst"
   ok "~/${dst#"$HOME"/}"
+}
+
+# gh_install <owner/repo> <asset> <destino> <versão atual> [processo]
+# Instala o <asset> (.tar.gz/.tar.xz) da última release estável do GitHub em <destino>,
+# conferindo o sha256. Não faz nada se <versão atual> já for a última.
+# Se [processo] estiver rodando, não atualiza (para não trocar arquivos em uso).
+gh_install() {
+  local repo="$1" asset="$2" dest="$3" current="${4#v}" busy="${5:-}"
+  local release latest url digest tmp
+  release="$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest")"
+  latest="$(jq -r .tag_name <<<"$release")"
+  url="$(jq -r --arg a "$asset" '.assets[] | select(.name == $a) | .browser_download_url' <<<"$release")"
+  digest="$(jq -r --arg a "$asset" '.assets[] | select(.name == $a) | .digest // empty' <<<"$release")"
+
+  if [ -z "$url" ]; then
+    warn "$asset não encontrado na última release de $repo"
+    return 1
+  elif [ "$current" = "${latest#v}" ]; then
+    ok "$repo $latest já é a última versão"
+    return 0
+  elif [ -n "$busy" ] && pgrep -x "$busy" >/dev/null; then
+    warn "$repo $latest disponível, mas $busy está aberto — feche e rode de novo"
+    return 0
+  fi
+
+  tmp="$(mktemp -d)"
+  curl -fsSL "$url" -o "$tmp/$asset"
+  if [ -n "$digest" ]; then
+    echo "${digest#sha256:}  $tmp/$asset" | sha256sum -c --quiet
+  else
+    warn "release sem sha256, pulando verificação"
+  fi
+  mkdir "$tmp/out"
+  tar -xf "$tmp/$asset" -C "$tmp/out" --strip-components=1
+  rm -rf "$dest"
+  mkdir -p "$(dirname "$dest")"
+  mv "$tmp/out" "$dest"
+  rm -rf "$tmp"
+  ok "$repo ${current:+$current -> }$latest instalado em ${dest/#"$HOME"/\~}"
 }
 
 # -- etapas -------------------------------------------------------------------
@@ -119,30 +160,10 @@ step_pipx() {
 step_atuin() {
   info "atuin (histórico do shell)"
   # última release estável do GitHub (o apt fica bem atrás); rodar de novo atualiza
-  local latest current
-  latest="$(curl -fsSI https://github.com/atuinsh/atuin/releases/latest | sed -n 's|^location: .*/tag/v\([^[:space:]]*\).*|\1|ip')"
-  current="$("$LOCAL_BIN/atuin" --version 2>/dev/null | awk '{print $2}')" || true
-  if [ -z "$latest" ]; then
-    warn "não consegui descobrir a última versão do atuin no GitHub"
-  elif [ "$current" = "$latest" ]; then
-    ok "atuin $current já é a última versão"
-  else
-    local name tmp
-    name="atuin-$(uname -m)-unknown-linux-gnu"
-    tmp="$(mktemp -d)"
-    (
-      cd "$tmp"
-      curl -fsSLO "https://github.com/atuinsh/atuin/releases/download/v$latest/$name.tar.gz"
-      curl -fsSLO "https://github.com/atuinsh/atuin/releases/download/v$latest/$name.tar.gz.sha256"
-      sha256sum -c --quiet "$name.tar.gz.sha256"
-      tar -xzf "$name.tar.gz"
-      mkdir -p "$LOCAL_BIN"
-      install -m 755 "$name/atuin" "$LOCAL_BIN/atuin"
-    )
-    rm -rf "$tmp"
-    ok "atuin ${current:+$current -> }$latest instalado em $LOCAL_BIN"
-  fi
-  export PATH="$LOCAL_BIN:$PATH"
+  local dir="$HOME/.local/opt/atuin" current
+  current="$("$dir/atuin" --version 2>/dev/null | awk '{print $2}')" || true
+  gh_install atuinsh/atuin "atuin-$(uname -m)-unknown-linux-gnu.tar.gz" "$dir" "$current"
+  ln -sf "$dir/atuin" "$LOCAL_BIN/atuin"
 
   # no bash, o atuin precisa do bash-preexec para capturar os comandos
   local preexec="$HOME/.bash-preexec.sh"
@@ -167,6 +188,13 @@ step_mise() {
   fi
   export PATH="$LOCAL_BIN:$HOME/.local/share/mise/shims:$PATH"
   mise install --yes
+
+  # rust-analyzer (LSP do Rust usado pelo Neovim), clippy e rustfmt
+  local rustup="$HOME/.cargo/bin/rustup"
+  if [ -x "$rustup" ]; then
+    "$rustup" component add rust-analyzer clippy rustfmt >/dev/null
+    ok "rust: rust-analyzer, clippy, rustfmt"
+  fi
   ok "ferramentas instaladas (confira com: mise ls)"
 
   # Completions geradas uma vez (mais rápido que eval a cada shell)
@@ -190,13 +218,63 @@ step_tmux() {
 }
 
 step_nvim() {
-  info "Neovim + LazyVim"
-  if [ -e "$HOME/.config/nvim" ]; then
-    ok "~/.config/nvim já existe, mantendo"
-  else
-    git clone -q https://github.com/LazyVim/starter "$HOME/.config/nvim"
-    rm -rf "$HOME/.config/nvim/.git"
-    ok "LazyVim instalado (plugins baixam ao abrir o nvim)"
+  info "Neovim + LazyVim (config em home/.config/nvim)"
+  # Neovim da última release estável do GitHub (o apt fica atrás e o LazyVim/rustaceanvim pedem 0.12+)
+  local dir="$HOME/.local/opt/nvim" current arch
+  current="$("$dir/bin/nvim" --version 2>/dev/null | awk 'NR==1 {print $2}')" || true
+  arch="$(uname -m)"; [ "$arch" = aarch64 ] && arch=arm64
+  gh_install neovim/neovim "nvim-linux-$arch.tar.gz" "$dir" "$current"
+  ln -sf "$dir/bin/nvim" "$LOCAL_BIN/nvim"
+
+  # a config chega via etapa dotfiles; aqui só instala os plugins nas versões do lazy-lock.json.
+  nvim --headless "+Lazy! restore" +qa >/dev/null 2>&1
+  ok "plugins do LazyVim instalados"
+  # servidores LSP/formatters dos extras (lazyvim.json), para o goto definition já funcionar
+  nvim --headless -c "luafile $REPO/scripts/nvim-mason-install.lua"
+  ok "servidores LSP instalados (mason)"
+}
+
+step_zen() {
+  info "Zen Browser"
+  # última release estável do GitHub em ~/.local/share/zen (sem sudo).
+  # Como a pasta é sua, o próprio Zen se atualiza sozinho; rodar de novo também atualiza.
+  local dir="$HOME/.local/share/zen" current
+  current="$(sed -n 's/^Version=//p' "$dir/application.ini" 2>/dev/null)" || true
+  gh_install zen-browser/desktop "zen.linux-$(uname -m).tar.xz" "$dir" "$current" zen-bin
+
+  mkdir -p "$HOME/.local/share/applications"
+  ln -sf "$dir/zen" "$LOCAL_BIN/zen"
+  cat >"$HOME/.local/share/applications/zen.desktop" <<EOF
+[Desktop Entry]
+Name=Zen Browser
+GenericName=Web Browser
+Exec=$dir/zen %u
+Icon=$dir/browser/chrome/icons/default/default128.png
+Type=Application
+Terminal=false
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+StartupWMClass=zen
+StartupNotify=true
+Actions=new-window;new-private-window;
+
+[Desktop Action new-window]
+Name=Nova janela
+Exec=$dir/zen --new-window %u
+
+[Desktop Action new-private-window]
+Name=Nova janela privada
+Exec=$dir/zen --private-window %u
+EOF
+  ok "atalho criado no menu de aplicativos"
+
+  # Ubuntu 24.04+ bloqueia user namespaces de apps sem perfil AppArmor,
+  # o que deixa o sandbox do Zen degradado. Mesmo esquema do perfil do Firefox.
+  local profile="$REPO/etc/apparmor.d/zen-browser"
+  if [ -d /etc/apparmor.d ] && ! cmp -s "$profile" /etc/apparmor.d/zen-browser; then
+    sudo install -m 644 "$profile" /etc/apparmor.d/zen-browser
+    sudo apparmor_parser -r /etc/apparmor.d/zen-browser
+    ok "perfil AppArmor do Zen instalado"
   fi
 }
 
