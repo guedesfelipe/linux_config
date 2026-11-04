@@ -1,0 +1,12 @@
+# Versões globais das linguagens/ferramentas (substitui o asdf).
+# Edite aqui e rode `mise install` (ou `./install.sh mise`).
+# Por projeto, use um mise.toml / .tool-versions na pasta do projeto.
+# Docs: https://mise.jdx.dev
+
+[tools]
+python = "3.15"
+node = "lts"
+rust = "stable"
+uv = "latest"
+"pipx:poetry" = "latest"
+"npm:gitmoji-cli" = "latest"

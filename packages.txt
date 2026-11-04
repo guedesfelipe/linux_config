@@ -1,0 +1,32 @@
+# Pacotes apt instalados por `./install.sh packages`. Um por linha.
+# Linguagens (Python, Node, Rust...) NÃO ficam aqui: veja home/.config/mise/config.toml
+
+# base
+build-essential
+curl
+git
+unzip
+xz-utils
+fontconfig
+pipx
+
+# terminal
+tmux
+starship
+ripgrep
+fd-find
+fzf
+bat
+eza
+jq
+tree
+htop
+xclip
+wl-clipboard
+
+# desktop
+meld
+flameshot
+gnome-tweaks
+gnome-shell-extensions
+gnome-shell-extension-prefs

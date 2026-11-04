@@ -1,0 +1,10 @@
+# Perfil permissivo (como o do Firefox/Brave do Ubuntu): só libera user namespaces
+# para o sandbox do Zen instalado em ~/.local/share/zen. Gerado pelo linux_config.
+abi <abi/5.0>,
+include <tunables/global>
+
+profile zen-browser @{HOME}/.local/share/zen/zen{,-bin} flags=(unconfined) {
+  userns,
+
+  include if exists <local/zen-browser>
+}
